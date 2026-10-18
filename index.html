@@ -1,43 +1,8 @@
 <!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>어휘 놀이터 · 수능 국어</title>
 <link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
-<script src="firebase-config.js"></script>
-<script>
-/* Claude 아티팩트의 user / db / sample 을 파이어베이스로 대신하는 연결부 */
-(function(){
-  const cfg=window.FIREBASE_CONFIG||{},teacher=String(window.TEACHER_EMAIL||"").toLowerCase();
-  let auth=null,db=null,ready=null;
-  function init(){
-    if(ready)return ready;
-    if(!window.firebase||!cfg.apiKey||/^YOUR_/.test(cfg.apiKey))return ready=Promise.resolve(false);
-    firebase.initializeApp(cfg);auth=firebase.auth();db=firebase.firestore();auth.useDeviceLanguage();
-    ready=new Promise(res=>{const off=auth.onAuthStateChanged(()=>{off();res(true)})});
-    return ready;
-  }
-  async function signIn(){
-    if(!(await init()))throw Error("firebase-config.js 설정이 필요해요");
-    if(auth.currentUser)return auth.currentUser;
-    const p=new firebase.auth.GoogleAuthProvider();p.setCustomParameters({prompt:"select_account"});
-    try{return(await auth.signInWithPopup(p)).user}
-    catch(e){
-      if(e.code==="auth/popup-blocked"||e.code==="auth/operation-not-supported-in-this-environment"){await auth.signInWithRedirect(p);return new Promise(()=>{})}
-      throw e;
-    }
-  }
-  const user={
-    id:async()=>(await signIn()).uid,
-    canEdit:async()=>{await init();const u=auth&&auth.currentUser;return !!(u&&u.email&&teacher&&u.email.toLowerCase()===teacher)}
-  };
-  window.__vocabUse=async function(n){
-    if(n==="user")return user;
-    if(n==="db")return (await init())?db:null;
-    return null; /* sample(AI 글쓰기·어휘 분석)은 Claude 안에서만 동작 */
-  };
-})();
-</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 <style>
 :root{--bg1:#d6ecc2;--bg2:#a9d58b;--c:#fffdf5;--t:#1f2420;--m:#5d665a;--ln:#1f2420;--red:#e5252a;--cr:#f6e7c1;--ok:#2a9d4a;--no:#d62828;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg1:#233a24;--bg2:#162417;--c:#2a3128;--t:#f3f1e6;--m:#b4bdae;--ln:#0b120c;--cr:#3a4236;--ok:#5fd17f;--no:#ff7a7a;color-scheme:dark}}
@@ -136,20 +101,21 @@ const cheer=(r,i)=>i%2?sy(GIRL,"선생님",(r?CG:CGw)[(i>>1)%2]):sy(DOG,"배찌 
 const $=s=>document.querySelector(s),app=$("#app");
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const ls=(k,v)=>{try{if(v===undefined)return JSON.parse(localStorage.getItem(k));localStorage.setItem(k,JSON.stringify(v))}catch(e){return null}};
-const use=n=>window.__vocabUse?window.__vocabUse(n).catch(()=>null):Promise.resolve(null);
+const use=n=>window.claude?window.claude.use(n).catch(()=>null):Promise.resolve(null);
 const shuffle=a=>[...a].sort(()=>Math.random()-.5);
 const ymd=(o=0)=>new Date(Date.now()+324e5-o*864e5).toISOString().slice(0,10);
 function toast(m){const e=document.createElement("div");e.className="tt";e.textContent=m;document.body.append(e);setTimeout(()=>e.remove(),1800)}
 let F=ls("vf")||{g:0,y:0},extra=ls("vx")||[],sample=null,db=null,user=null,uid=null,canEd=false,ME=null,admin=0,prev=0,playing=0,Q=[],qi=0,ok=0,tot=0,gain=0,full=0,set=[],PT="",t0=0,SI=-1,H=[],hi=-1,stage="q",bd=0,atLogin=1;
 const pool=()=>W.concat(extra),fpool=()=>pool().filter(x=>(!F.g||(x.g||1)==F.g)&&(!F.y||(x.y||2026)==F.y)&&(!F.m||(x.mo||0)==F.m)),sig=()=>set.map(x=>x.w).join("|");
-function today(){const p=fpool();if(p.length<=20)return p;const key=F.g+"-"+F.y+"-"+F.m,dd=ME&&ME.day;
+const cnt=()=>Math.min(60,Math.max(5,Math.round(+(ME&&ME.n))||20)),PK=[...PS.join("").matchAll(/\[\[(.+?)\]\]/g)].map(m=>m[1]);
+function today(){const N=cnt(),p=fpool();if(p.length<=N)return p;const key=F.g+"-"+F.y+"-"+F.m+"-"+N,dd=ME&&ME.day;
 if(dd&&dd.d===ymd()&&dd.k===key){const r=dd.w.map(w=>p.find(x=>x.w===w)).filter(Boolean);if(r.length===dd.w.length)return r}
 const seen=(ME&&ME.seen)||[],un=p.filter(x=>!seen.includes(x.w)),g=[0,1,2,3,4].map(i=>un.filter(x=>x.s===i)),r=[];
-for(let i=0;r.length<20&&g.some(a=>a[i]);i++)g.forEach(a=>{if(a[i]&&r.length<20)r.push(a[i])});
-if(r.length<20)r.push(...seen.map(w=>p.find(x=>x.w===w)).filter(Boolean).slice(0,20-r.length));
+for(let i=0;r.length<N&&g.some(a=>a[i]);i++)g.forEach(a=>{if(a[i]&&r.length<N)r.push(a[i])});
+if(r.length<N)r.push(...seen.map(w=>p.find(x=>x.w===w)).filter(Boolean).slice(0,N-r.length));
 if(ME){ME.day={d:ymd(),k:key,w:r.map(x=>x.w)};save()}return r}
 const pts=()=>(ME.xp||0)+(ME.gift||0),dref=()=>db&&uid&&uid!="local"?db.doc("students/"+uid):null;
-async function save(){if(prev||!ME)return;ls("me"+uid,ME);const r=dref();if(r)try{await r.update({no:ME.no,name:ME.name,xp:ME.xp,streak:ME.streak,last:ME.last,log:ME.log,weak:ME.weak||[],seen:ME.seen||[],day:ME.day||{}})}catch(e){}}
+async function save(){if(prev||!ME)return;ls("me"+uid,ME);const r=dref();if(r)try{await r.update({no:ME.no,name:ME.name,xp:ME.xp,streak:ME.streak,last:ME.last,log:ME.log,weak:ME.weak||[],seen:ME.seen||[],day:ME.day||{},n:ME.n||20})}catch(e){}}
 async function load(){const r=dref();if(r)try{const s=await r.get();return s.exists?s.data():null}catch(e){}return ls("me"+uid)}
 let pi=0,res=0,PTs=[],PR=[];
 const go=f=>{playing=0;H=H.slice(0,hi+1);H.push(f);hi=H.length-1;f()};
@@ -159,16 +125,19 @@ if(hi>0){hi--;H[hi]()}else toast("더 갈 곳이 없어요")}
 function fw(){if(res)return go(home);
 if(playing){if(stage=="q"){if(Q[qi]&&Q[qi].d){qi++;return ask()}return toast("채점하고 넘어가자!")}if(stage=="read")return blank(pi);if(PR[pi]&&PR[pi].d)return pi+1<PTs.length?read(pi+1):finish();return toast("채점한 뒤에 넘어갈 수 있어요")}
 if(hi<H.length-1){hi++;H[hi]()}else toast("앞으로 갈 곳이 없어요")}
-const tb=()=>`<div class="top"><button class="b" id="bk">◀ 뒤로</button><button class="b" id="hm">🏠 홈</button><button class="b" id="fw">앞으로 ▶</button></div><div class="bar"><span>${admin&&!prev?"👩‍🏫 교사 관리 모드":ME?`👤 ${esc(ME.no)} ${esc(ME.name)}`:""}</span>${ME&&!(admin&&!prev)?`<span>🔥${ME.streak} · ⭐<b id="pts">${pts()}</b></span>`:""}${canEd?`<button class="b chip" id="md">${admin&&!prev?"학생 모드":admin?"교사 화면으로":"교사 모드"}</button>`:""}</div>`;
+const tb=()=>`<div class="top"><button class="b" id="bk">◀ 뒤로</button><button class="b" id="hm">🏠 홈</button><button class="b" id="fw">앞으로 ▶</button></div><div class="bar"><span>${admin&&!prev?"👩‍🏫 교사 관리 모드":ME?`👤 ${esc(ME.no)} ${esc(ME.name)}${window.fbEmail?" · "+esc(window.fbEmail):""}`:""}</span>${ME&&!(admin&&!prev)?`<span>🔥 학습일 ${ME.streak}일 · ⭐ 내 포인트 <b id="pts">${pts()}</b></span>`:""}<button class="b chip" id="lo">로그아웃</button>${canEd?`<button class="b chip" id="md">${admin&&!prev?"학생 모드":admin?"교사 화면으로":"교사 모드"}</button>`:""}</div>`;
 function toStu(){prev=1;if(!ME||!ME.no)ME={no:"체험",name:"미리보기",xp:0,gift:0,streak:0,last:"",log:[]};go(home)}
-function bindTop(){$("#bk").onclick=back;$("#fw").onclick=fw;$("#hm").onclick=()=>go(admin&&!prev?adm:home);const m=$("#md");if(m)m.onclick=()=>{if(admin&&!prev)toStu();else if(admin){prev=0;go(adm)}else pw(()=>{admin=1;prev=0;go(adm)})}}
+function bindTop(){$("#bk").onclick=back;$("#fw").onclick=fw;$("#hm").onclick=()=>go(admin&&!prev?adm:home);$("#lo").onclick=logout;const m=$("#md");if(m)m.onclick=()=>{if(admin&&!prev)toStu();else if(admin){prev=0;go(adm)}else pw(()=>{admin=1;prev=0;go(adm)})}}
 const act=(l,ns=1)=>`<div id="act"><button class="b" id="rs">↻ 다시 시작</button><button class="b r" id="gr">${l}</button>${ns?`<button class="b" id="ns">다음 단계 ⏭</button>`:""}<button class="b" id="en">끝내기</button></div>`;
 function R(h,a,fn){app.innerHTML=`<div class="w">${tb()}${h}</div>${a||""}`;bindTop();if(a){$("#rs").onclick=()=>start(SI);$("#en").onclick=finish;$("#gr").onclick=fn;if($("#ns"))$("#ns").onclick=nextStage}}
 function pw(cb){const o=document.createElement("div");o.className="mod";o.innerHTML=`<div class="card"><b>🔒 관리자 비밀번호</b><input id="pi" type="password" inputmode="numeric" autocomplete="off"><div id="pe" class="sm"></div><div class="row"><button class="b" id="pc">취소</button><button class="b r" id="po">확인</button></div></div>`;document.body.append(o);$("#pi").focus();$("#pc").onclick=()=>o.remove();
 $("#po").onclick=async()=>{const h=[...new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode($("#pi").value)))].map(b=>b.toString(16).padStart(2,"0")).join("");if(h==HASH){o.remove();cb()}else $("#pe").textContent="비밀번호가 달라요."}}
-function login(){atLogin=1;playing=0;app.innerHTML=`<div class="w"><img class="hero" src="${HERO}" alt=""><div class="card" style="text-align:center"><h1>📚 어휘 놀이터</h1><p>수능 국어 기출 낱말을 매일 20개, 게임처럼!</p><button class="b r bb" id="gl">계정으로 시작하기</button><p class="sm">처음에는 학번과 이름을 한 번만 등록해요. 다음부터는 이 버튼만 누르면 돼요.</p><button class="b bb" id="ad">🔒 교사 로그인</button></div></div>`;
-$("#gl").onclick=enter;$("#ad").onclick=async()=>{try{await user.id();canEd=!!(await user.canEdit())}catch(e){return toast("로그인에 실패했어요")}if(!canEd)return toast("교사 계정이 아니에요");pw(()=>{atLogin=0;admin=1;prev=0;go(adm)})}}
-async function enter(){atLogin=0;uid=user?await user.id().catch(()=>null):null;uid=uid||"local";try{canEd=!!(user&&await user.canEdit())}catch(e){}ME=await load();if(ME)ME.weak=ME.weak||[];ME?go(intro):reg()}
+async function logout(){try{if(window.fbSignOut)await window.fbSignOut()}catch(e){}ME=null;uid=null;admin=0;prev=0;playing=0;res=0;H=[];hi=-1;if(window.fbSignOut){canEd=false;window.fbEmail=null;window.fbUser=null}login()}
+function tlogin(){pw(async()=>{uid=user?await user.id().catch(e=>{toast("구글 로그인 실패: "+(e.code||e.message));return null}):null;uid=uid||"local";try{canEd=!!(user&&await user.canEdit())}catch(e){}
+if(!canEd)return toast("교사로 등록된 계정이 아니에요"+(window.fbEmail?" ("+window.fbEmail+")":""));atLogin=0;admin=1;prev=0;go(adm)})}
+function login(){atLogin=1;playing=0;app.innerHTML=`<div class="w"><img class="hero" src="${HERO}" alt=""><div class="card" style="text-align:center"><h1>📚 어휘 놀이터</h1><p>수능 국어 기출 낱말을 매일 20개, 게임처럼!</p><button class="b r bb" id="gl">Google 계정으로 시작하기</button><p class="sm">처음에는 학번과 이름을 한 번만 등록해요. 다음부터는 이 버튼만 누르면 돼요.</p><button class="b bb" id="tl">👩‍🏫 교사 로그인</button></div></div>`;
+$("#gl").onclick=enter;$("#tl").onclick=tlogin}
+async function enter(){atLogin=0;uid=user?await user.id().catch(e=>{toast("구글 로그인 실패: "+(e.code||e.message));return null}):null;if(!uid&&window.fbOK){atLogin=1;return}uid=uid||"local";try{canEd=!!(user&&await user.canEdit())}catch(e){}ME=await load();if(ME)ME.weak=ME.weak||[];ME?go(intro):reg()}
 function reg(){app.innerHTML=`<div class="w"><div class="card"><h1>처음 왔구나!</h1>${T2("멍멍! 만나서 반가워!","학번과 이름을 알려 줘. 한 번만 적으면 돼!")}<input id="rn" placeholder="학번 (예: 10203)" inputmode="numeric"><input id="rm" placeholder="이름"><button class="b r bb" id="rg">등록하고 시작 ▶</button></div></div>`;
 $("#rg").onclick=async()=>{const no=$("#rn").value.trim(),name=$("#rm").value.trim();if(!no||!name)return toast("학번과 이름을 모두 적어 줘!");ME={no,name,xp:0,gift:0,streak:0,last:"",log:[],weak:[]};ls("me"+uid,ME);const r=dref();if(r)try{await r.set(ME)}catch(e){}go(intro)}}
 const IN=[["왜 어휘 공부가 필요해?","멍멍! 나는 배찌야 🐶 너의 공부 친구지! 낱말을 알면 글이 술술 읽혀서 기분이 좋아져!","안녕, 선생님이야 🌸 수능 국어는 글을 빨리 정확히 읽는 싸움인데, 낱말 뜻을 모르면 글이 안 읽히거든. 기출에 진짜 나온 낱말부터 익히면 독해가 훨씬 쉬워져!"],["우리 뭐 하면 좋을까?","하루 20단어만 같이 해 보자! 틀린 낱말은 ‘약점 어휘’에 모아 둘게. 멍멍!","① 뜻 맞히기 → ② 문맥 속 빈칸 → ③ 직접 입력 → ④ 오늘의 글 2편. 포인트도 쌓이고 선생님이 선물 포인트도 보낼 거야. 같이 해 보자!"]];
@@ -177,8 +146,8 @@ function home(){playing=0;const T=today(),L=ME.log,la=L[L.length-1],ys=[...new S
 const st0=la&&la.sec>=0?la.sec+1:0,rec=[0,1,2,3,4].map(i=>(st0+i)%5).find(s=>T.some(x=>x.s===s));
 const when=la?(la.d==ymd()?"아까":la.d==ymd(1)?"어제":"지난번"):"";
 const msg=!T.length?"이 조건의 자료는 아직 없어. 아래에서 다른 자료를 골라 보자!":!la?`처음이구나, 반가워! 👇 ‘오늘의 어휘 학습’부터 시작해 보자.`:`저번에는 ${la.tot}문제 도전 중 ${la.ok}문제 맞췄어. 오늘도 최선을 다해보자! 👇`;
-R(`${sy(GIRL,"선생님",msg+((ME.weak||[]).length?"<br>🔁 약점 어휘 다시 풀기에 <b>"+ME.weak.length+"개</b> 단어가 모여 있어. 오늘 꼭 복습해!":""))}<b class="hd">🎯 전체 어휘 학습</b>${T.length?`<div style="position:relative;margin-top:30px"><span class="arr">👇</span><button class="b r bb" data-s="-1" style="margin-top:0">오늘의 어휘 학습 ▶</button></div>`:""}<b class="hd">📚 영역별 어휘 학습</b><div class="g">${SEC.map((n,i)=>{const c=T.filter(x=>x.s===i).length;return`<button class="b sc" data-s="${i}" ${c?"":"disabled"}><div>${ICO[i]}</div><b>${n}</b><div class="sm">${c}단어</div></button>`}).join("")}</div><button class="b bb" data-s="-2" ${(ME.weak||[]).length?"":"disabled"}>🔁 약점 어휘 다시 풀기 (${(ME.weak||[]).length})</button><details class="card"><summary><b>📂 어휘 추출 자료 선택</b> <span class="sm">학년·연도·월</span></summary><div>${[0,1,2,3].map(g=>fc("g",g,g?"고"+g+" 기출":"전체 학년")).join("")}</div><div>${[0,...ys].map(y=>fc("y",y,y?y+"년 모의고사":"전체 연도")).join("")}</div><div>${[0,...ms].map(m=>fc("m",m,m?m+"월":"전체 월")).join("")}</div></details>`);
-app.querySelectorAll("[data-s]").forEach(b=>b.onclick=()=>start(+b.dataset.s));app.querySelectorAll("[data-f]").forEach(b=>b.onclick=()=>{F[b.dataset.f]=+b.dataset.v;ls("vf",F);home()});
+R(`${sy(GIRL,"선생님",msg+((ME.weak||[]).length?"<br>🔁 약점 어휘 다시 풀기에 <b>"+ME.weak.length+"개</b> 단어가 모여 있어. 오늘 꼭 복습해!":""))}<b class="hd">🎯 전체 어휘 학습</b>${T.length?`<div style="position:relative;margin-top:30px"><span class="arr">👇</span><button class="b r bb" data-s="-1" style="margin-top:0">오늘의 어휘 학습 ▶ (${T.length}개)</button></div>`:""}<div class="card"><b>🎚️ 오늘 학습할 단어 수</b><div>${[10,20,30,40].map(n=>`<button class="b chip${cnt()==n?" on":""}" data-n="${n}">${n}개</button>`).join("")}</div><div style="margin-top:6px"><input id="nn" type="number" min="5" max="60" value="${cnt()}" style="width:5em;display:inline-block"> 개 <button class="b chip" id="nb">직접 정하기</button></div><div class="sm">기본은 20개예요. 5~60개 사이로 정할 수 있어요.</div></div><b class="hd">📚 영역별 어휘 학습</b><div class="sm">등록된 어휘 총 <b>${pool().length}개</b>${fpool().length!=pool().length?` · 선택한 자료 ${fpool().length}개`:""}</div><div class="g">${SEC.map((n,i)=>{const c=T.filter(x=>x.s===i).length;return`<button class="b sc" data-s="${i}" ${c?"":"disabled"}><div>${ICO[i]}</div><b>${n}</b><div class="sm">오늘 ${c}개 · 전체 ${fpool().filter(x=>x.s===i).length}개</div></button>`}).join("")}</div><button class="b bb" data-s="-2" ${(ME.weak||[]).length?"":"disabled"}>🔁 약점 어휘 다시 풀기 (${(ME.weak||[]).length})</button><details class="card"><summary><b>📂 어휘 추출 자료 선택</b> <span class="sm">학년·연도·월</span></summary><div>${[0,1,2,3].map(g=>fc("g",g,g?"고"+g+" 기출":"전체 학년")).join("")}</div><div>${[0,...ys].map(y=>fc("y",y,y?y+"년 모의고사":"전체 연도")).join("")}</div><div>${[0,...ms].map(m=>fc("m",m,m?m+"월":"전체 월")).join("")}</div></details>`);
+app.querySelectorAll("[data-s]").forEach(b=>b.onclick=()=>start(+b.dataset.s));app.querySelectorAll("[data-f]").forEach(b=>b.onclick=()=>{F[b.dataset.f]=+b.dataset.v;ls("vf",F);home()});const sn=n=>{ME.n=Math.min(60,Math.max(5,Math.round(+n)||20));save();home()};app.querySelectorAll("[data-n]").forEach(b=>b.onclick=()=>sn(b.dataset.n));$("#nb").onclick=()=>sn($("#nn").value);
 const r=dref();if(r)r.get().then(s=>{if(s.exists&&(s.data().gift||0)!=(ME.gift||0)){ME.gift=s.data().gift||0;const e=$("#pts");if(e)e.textContent=pts()}}).catch(()=>{})}
 function start(s){set=today();SI=s;const L=s==-1?set:s==-2?pool().filter(x=>(ME.weak||[]).includes(x.w)):set.filter(x=>x.s===s);if(!L.length)return toast("풀 단어가 아직 없어요");full=s==-1;
 const mk=(k,a)=>shuffle(a).map(w=>({k,w}));Q=s==-2?mk("r",L).concat(mk("t",L)):mk("m",L).concat(mk("c",L),mk("t",L));
@@ -196,9 +165,9 @@ if(k=="t"){q.v=$("#ti").value;if(!q.v.trim())return toast("답을 입력해 줘!
 q.d=1;tot++;if(q.r){ok++;gain+=10;if(SI==-2)ME.weak=ME.weak.filter(x=>x!=w.w)}else if(!ME.weak.includes(w.w))ME.weak.push(w.w);ask()});
 app.querySelectorAll(".opt").forEach(b=>b.onclick=()=>{if(!q.d){q.sel=+b.dataset.i;ask()}})}
 function nextStage(){if(stage!="q"||!Q[qi])return;const c=Q[qi].k,i=Q.findIndex((x,j)=>j>qi&&x.k!=c);if(i>=0){qi=i;return ask()}full?passage():finish()}
-async function passage(){stage="read";let ts=set.length==20&&set.every(x=>W.includes(x))?PS:ls("pg2"+sig());
-if(!ts){if(!sample)return finish();app.innerHTML='<div class="w"><div class="card">오늘의 글 2편을 쓰고 있어요…</div></div>';const a=set.map(x=>x.w),h=Math.ceil(a.length/2);
-try{ts=(await sample(`다음 단어들을 나누어, 각각 주제가 하나로 통일된 한국어 글 두 편(각 250자 안팎)을 써라. 1편에는 [${a.slice(0,h).join(", ")}], 2편에는 [${a.slice(h).join(", ")}]를 사용한다. 각 단어는 [[단어]] 형태로(제시된 형태 그대로, 어미는 바깥에) 한 번씩 감싸고, 두 편은 한 줄에 ---만 적어 구분하며, 글 외의 설명은 쓰지 마라.`)).text.split(/\n-{3,}\n?/).map(x=>x.trim()).filter(Boolean);if(ts.length<2)throw 0;ls("pg2"+sig(),ts)}catch(e){return finish()}}
+async function passage(){stage="read";let ts=set.length==PK.length&&set.every(x=>PK.includes(x.w))?PS:ls("pg2"+sig());
+if(!ts){if(!sample)return finish();app.innerHTML='<div class="w"><div class="card">오늘의 글 2편을 쓰고 있어요…</div></div>';const a=set.map(x=>x.w),k=Math.max(1,Math.round(a.length/10)),sz=Math.ceil(a.length/k),gs=Array.from({length:k},(_,i)=>a.slice(i*sz,(i+1)*sz));
+try{ts=(await sample(`다음 단어들을 나누어, 각각 주제가 하나로 통일된 한국어 글 ${k}편(각 250자 안팎)을 써라. ${gs.map((g,i)=>`${i+1}편에는 [${g.join(", ")}]`).join(", ")}를 사용한다. 각 단어는 [[단어]] 형태로(제시된 형태 그대로, 어미는 바깥에) 한 번씩 감싸고, 글과 글은 한 줄에 ---만 적어 구분하며, 글 외의 설명은 쓰지 마라.`)).text.split(/\n-{3,}\n?/).map(x=>x.trim()).filter(Boolean);if(ts.length<k)throw 0;ls("pg2"+sig(),ts)}catch(e){return finish()}}
 PTs=ts.map(esc);PR=[];read(0)}
 function read(p){stage="read";pi=p;const keys=set.map(x=>x.w),h=PTs[p].replace(/\[\[(.+?)\]\]/g,(m,k)=>keys.includes(k)?`<mark data-k="${k}">${k}</mark>`:k);
 R(`<div class="card"><b>④ 📖 오늘의 글 ${p+1}/${PTs.length}</b><p class="ps">${h}</p><div id="tip" class="sm">표시된 단어를 눌러 뜻을 확인하세요.</div></div>`,act("빈칸 풀기 ▶",0),()=>blank(p));
@@ -217,7 +186,7 @@ let S=[],tab="s";
 async function adm(){playing=0;let body="";
 if(tab=="s"){if(!db)body='<p class="sm">저장소에 연결되어야 학생 목록을 볼 수 있어요.</p>';else{try{S=(await db.collection("students").get()).docs.map(d=>({id:d.id,...d.data()}))}catch(e){S=[]}
 S.sort((a,b)=>String(a.no).localeCompare(String(b.no)));body=`<div class="tw"><table><tr><th>학번</th><th>이름</th><th>⭐점수</th><th>🔥</th><th>최근</th></tr>${S.map(s=>`<tr data-id="${esc(s.id)}"><td>${esc(s.no)}</td><td>${esc(s.name)}</td><td>${(s.xp||0)+(s.gift||0)}</td><td>${s.streak||0}</td><td>${esc(s.last||"-")}</td></tr>`).join("")||'<tr><td colspan="5">아직 등록한 학생이 없어요.</td></tr>'}</table></div><p class="sm">학생을 누르면 성적 기록과 선물 포인트를 볼 수 있어요.</p>`}}
-else body=`<p class="sm">기출 PDF 또는 텍스트를 올리면 Claude가 어휘를 뽑아 추가해요.</p><input type="file" id="f" accept=".pdf,.txt"><textarea id="tx" placeholder="또는 지문·문제 텍스트를 붙여넣으세요"></textarea><div>자료 학년 <select id="gs"><option value="1">고1</option><option value="2">고2</option><option value="3">고3</option></select> 연도 <input id="ys" type="number" value="2026" style="width:6em"> 월 <select id="ms">${[3,4,5,6,7,9,10,11].map(m=>`<option value="${m}">${m}월</option>`).join("")}</select></div><button class="b r bb" id="an">분석해서 단어 추가</button><div id="st" class="sm"></div><button class="b chip" id="rs">추가한 단어 모두 지우기</button>`;
+else body=`<div class="card" style="margin:0 0 10px">📊 등록된 어휘 <b>${pool().length}개</b> (기본 ${W.length}개 + 업로드 ${extra.length}개)<br>${SEC.map((n,i)=>n+" "+pool().filter(x=>x.s===i).length+"개").join(" · ")}</div><p class="sm">파일 형식은 상관없어요. PDF·엑셀(xlsx, xls, csv)·워드(docx)·이미지(사진, 캡처)·텍스트 파일을 여러 개 한꺼번에 올리면 Claude가 어휘를 뽑아 추가해요.</p><input type="file" id="f" multiple><textarea id="tx" placeholder="또는 지문·문제 텍스트를 붙여넣으세요"></textarea><div>자료 학년 <select id="gs"><option value="1">고1</option><option value="2">고2</option><option value="3">고3</option></select> 연도 <input id="ys" type="number" value="2026" style="width:6em"> 월 <select id="ms">${[3,4,5,6,7,9,10,11].map(m=>`<option value="${m}">${m}월</option>`).join("")}</select></div><button class="b bb" id="au">🌐 호랭이닷컴에서 기출 자동 가져오기 + 분석</button><details><summary class="sm">다른 PDF 주소 직접 입력</summary><input id="au2" placeholder="https://… .pdf"></details><button class="b r bb" id="an">분석해서 단어 추가</button><div id="st" class="sm"></div><button class="b chip" id="rs">추가한 단어 모두 지우기</button>`;
 app.innerHTML=`<div class="w wide">${tb()}<div class="card"><div class="row" style="justify-content:flex-start;margin:0 0 10px"><button class="b chip${tab=="s"?" on":""}" data-t="s">👥 학생 관리</button><button class="b chip${tab=="u"?" on":""}" data-t="u">📄 자료 업로드</button><button class="b chip" id="sv">🎓 학생 화면 보기</button></div><div id="ad">${body}</div></div></div>`;bindTop();
 app.querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>{tab=b.dataset.t;adm()});$("#sv").onclick=toStu;
 app.querySelectorAll("tr[data-id]").forEach(r=>r.onclick=()=>det(r.dataset.id));if(tab=="u")bindT()}
@@ -225,20 +194,50 @@ function det(id){const s=S.find(x=>x.id==id);if(!s)return;const L=(s.log||[]).sl
 $("#ad").innerHTML=`<button class="b chip" id="bl">◀ 목록</button><h1>${esc(s.no)} ${esc(s.name)}</h1><div class="stats"><div><b>${(s.xp||0)+(s.gift||0)}</b><br>총 포인트</div><div><b>${s.xp||0}</b><br>학습 포인트</div><div><b>${s.gift||0}</b><br>선물 포인트</div></div><b>🎁 선물 포인트 보내기</b><input id="gv" type="number" placeholder="포인트 (음수는 차감)"><button class="b r bb" id="gs2">보내기</button><b>📈 성적 기록</b><div class="tw"><table><tr><th>날짜</th><th>범위</th><th>정답</th><th>+점</th><th>시간</th></tr>${L.map(l=>`<tr><td>${esc(l.d)}</td><td>${l.sec<0?"전체":SEC[l.sec]}</td><td>${l.ok}/${l.tot}</td><td>+${l.gain}</td><td>${l.min}분</td></tr>`).join("")||'<tr><td colspan="5">기록이 없어요.</td></tr>'}</table></div>`;
 $("#bl").onclick=adm;$("#gs2").onclick=async()=>{const n=parseInt($("#gv").value);if(!n)return toast("포인트를 입력해 주세요");try{await db.doc("students/"+id).update({gift:(s.gift||0)+n});toast("보냈어요 🎁");await adm();det(id)}catch(e){toast("저장 실패")}}}
 function bindT(){const st=t=>$("#st").textContent=t;
-async function readFile(f){if(/pdf$/i.test(f.name)){if(!window.pdfjsLib)throw Error("PDF 읽기 도구를 불러오지 못했어요. 텍스트를 붙여넣어 주세요.");
-pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-const pdf=await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise;let t="";
-for(let i=1;i<=pdf.numPages;i++){t+=(await(await pdf.getPage(i)).getTextContent()).items.map(x=>x.str).join(" ")+"\n"}return t}return f.text()}
+const IMG=/\.(jpe?g|png|webp|gif|bmp|heic|heif|avif|tiff?)$/i;
+async function dec(f){const b=await f.arrayBuffer();let t=new TextDecoder("utf-8").decode(b);if(t.includes("\ufffd"))try{t=new TextDecoder("euc-kr").decode(b)}catch(e){}return t}
+const png=c=>new Promise(r=>c.toBlob(r,"image/png"));
+async function readFile(f,U){const n=f.name;
+if(f.type.startsWith("image/")||IMG.test(n)){let b=f;if(!/^image\/(jpeg|png|webp|gif)$/.test(f.type)){try{const bm=await createImageBitmap(f),c=document.createElement("canvas");c.width=bm.width;c.height=bm.height;c.getContext("2d").drawImage(bm,0,0);b=await png(c)}catch(e){throw Error(n+": 이 이미지 형식은 읽지 못했어요. JPG나 PNG로 바꿔 주세요.")}}U.imgs.push(b);return}
+if(/\.pdf$/i.test(n)||f.type=="application/pdf"){if(!window.pdfjsLib)throw Error("PDF 읽기 도구를 불러오지 못했어요.");pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const pdf=await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise;let t="";for(let i=1;i<=pdf.numPages;i++)t+=(await(await pdf.getPage(i)).getTextContent()).items.map(x=>x.str).join(" ")+"\n";
+if(t.replace(/\s/g,"").length<80){for(let i=1;i<=Math.min(pdf.numPages,6);i++){const pg=await pdf.getPage(i),vp=pg.getViewport({scale:1.4}),c=document.createElement("canvas");c.width=vp.width;c.height=vp.height;await pg.render({canvasContext:c.getContext("2d"),viewport:vp}).promise;U.imgs.push(await png(c))}}else U.texts.push(t);return}
+if(/\.(xlsx|xlsm|xls|ods)$/i.test(n)){if(!window.XLSX)throw Error("엑셀 읽기 도구를 불러오지 못했어요.");const wb=XLSX.read(await f.arrayBuffer());U.texts.push(wb.SheetNames.map(k=>XLSX.utils.sheet_to_csv(wb.Sheets[k])).join("\n"));return}
+if(/\.docx$/i.test(n)){if(!window.mammoth)throw Error("워드 읽기 도구를 불러오지 못했어요.");U.texts.push((await mammoth.extractRawText({arrayBuffer:await f.arrayBuffer()})).value);return}
+const t=await dec(f);if((t.match(/[\u0000-\u0008\ufffd]/g)||[]).length>t.length*.02)throw Error(n+": 읽을 수 없는 형식이에요. PDF·엑셀·워드·이미지·텍스트로 저장해서 올려 주세요.");U.texts.push(t)}
 async function saveExtra(){ls("vx",extra);try{if(db)await db.doc("vocab/extra").set({list:extra})}catch(e){}}
-$("#an").onclick=async()=>{if(!sample)return st("이 환경에서는 분석 기능을 쓸 수 없어요.");
-try{st("자료를 읽는 중…");const f=$("#f").files[0],text=($("#tx").value||(f?await readFile(f):"")).slice(0,15000);if(!text.trim())return st("파일이나 텍스트를 넣어 주세요.");
-st("Claude가 어휘를 분석하는 중…");
-const r=await sample.json(`수능 국어 독해에 도움이 되는 어휘를 아래 자료에서 최대 20개 뽑아라. JSON 배열만 출력: [{"s":0,"w":"단어의 어간 또는 명사 부분","t":"하다 같은 어미 또는 빈 문자열","m":"뜻(25자 이내)","e":"자료에 나온 문장으로 w가 그대로 들어 있는 것"}]. s는 0문학,1비문학,2화작,3문법,4기타. 이미 있는 단어는 제외: ${pool().map(x=>x.w).join(",")}\n자료:\n${text}`);
-const add=(Array.isArray(r)?r:[]).filter(x=>x&&x.w&&x.m&&x.e&&String(x.e).includes(x.w)&&x.s>=0&&x.s<5&&!pool().some(p=>p.w===x.w)).map(x=>({s:x.s|0,w:String(x.w),t:String(x.t||""),m:String(x.m),e:String(x.e),g:+$("#gs").value,y:+$("#ys").value||2026,mo:+$("#ms").value}));
-extra=extra.concat(add);await saveExtra();st(`${add.length}개 단어를 추가했어요. 학생 화면에는 순환하는 오늘의 20단어로 반영됩니다.`);if(!playing)adm()}catch(e){st("분석 실패: "+(e.message||e.code||e))}};
+$("#an").onclick=async()=>{if(!sample)return st("이 환경에서는 분석 기능을 쓸 수 없어요.");const bt=$("#an");bt.disabled=1;
+try{st("자료를 읽는 중…");const U={texts:[],imgs:[]};for(const f of $("#f").files){try{await readFile(f,U)}catch(e){st(e.message);bt.disabled=0;return}}
+const pt=$("#tx").value.trim();if(pt)U.texts.push(pt);if(!U.texts.length&&!U.imgs.length){bt.disabled=0;return st("파일이나 텍스트를 넣어 주세요.")}
+let mx=6;if(U.imgs.length){const lim=await (sample.limits?sample.limits():Promise.resolve({})).catch(()=>({}));if(!lim.images){bt.disabled=0;return st("이 환경에서는 이미지·스캔 파일을 분석할 수 없어요. 글자가 들어 있는 파일을 올려 주세요.")}mx=lim.images.maxCount||6}
+const jobs=U.texts.map(t=>({t:t.slice(0,15000)}));for(let i=0;i<U.imgs.length;i+=mx)jobs.push({t:"",im:U.imgs.slice(i,i+mx)});
+let tot=0;for(let i=0;i<jobs.length;i++){st(`Claude가 어휘를 분석하는 중… (${i+1}/${jobs.length})`);const j=jobs[i];
+const r=await sample.json(`수능 국어 독해에 도움이 되는 어휘를 아래 자료에서 최대 20개 뽑아라. ${j.im?"첨부한 이미지 속 글자를 읽어서 그 내용을 자료로 삼아라. ":""}JSON 배열만 출력: [{"s":0,"w":"단어의 어간 또는 명사 부분","t":"하다 같은 어미 또는 빈 문자열","m":"뜻(25자 이내)","e":"자료에 나온 문장으로 w가 그대로 들어 있는 것"}]. s는 0문학,1비문학,2화작,3문법,4기타. 이미 있는 단어는 제외: ${pool().map(x=>x.w).join(",")}\n자료:\n${j.t}`,j.im?{images:j.im}:undefined);
+const add=(Array.isArray(r)?r:[]).filter(x=>x&&x.w&&x.m&&x.e&&String(x.e).includes(x.w)&&x.s>=0&&x.s<5&&!pool().some(p=>p.w===x.w)).map(x=>({s:x.s|0,w:String(x.w),t:String(x.t||""),m:String(x.m),e:String(x.e),g:+$("#gs").value,y:+$("#ys").value||2026,mo:+$("#ms").value}));extra=extra.concat(add);tot+=add.length}
+await saveExtra();st(`${tot}개 단어를 추가했어요. 오늘의 학습 단어에 자동으로 반영됩니다.`);bt.disabled=0;if(!playing)adm()}catch(e){bt.disabled=0;st("분석 실패: "+(e.message||e.code||e))}};
+$("#au").onclick=async()=>{const g=$("#gs").value,y=$("#ys").value,m=$("#ms").value,u=$("#au2").value.trim();st("호랭이닷컴에서 자료를 가져오는 중…");
+try{const t=await window.fbToken();const r=await fetch("/api/pdf?"+(u?"url="+encodeURIComponent(u):`g=${g}&y=${y}&m=${m}`),{headers:{Authorization:"Bearer "+t}});if(!r.ok)throw Error((await r.json().catch(()=>({}))).error||("가져오기 실패 "+r.status));
+const dt=new DataTransfer();dt.items.add(new File([await r.blob()],`${y}-${m}-고${g}.pdf`,{type:"application/pdf"}));$("#f").files=dt.files;$("#an").click()}catch(e){st("자동 가져오기 실패: "+(e.message||e))}};
 $("#rs").onclick=async()=>{extra=[];await saveExtra();st("추가한 단어를 지웠어요.");if(!playing)adm()};}
 login();
-(async()=>{sample=await use("sample");user=await use("user");db=await use("db");try{canEd=!!(user&&await user.canEdit())}catch(e){}
+(async()=>{await new Promise(r=>window.fbReady?r():addEventListener("fbready",r,{once:true}));sample=await use("sample");user=await use("user");db=await use("db");try{canEd=!!(user&&await user.canEdit())}catch(e){}
 if(db)try{const s=await db.doc("vocab/extra").get();if(s.exists&&Array.isArray(s.data().list)){extra=s.data().list;ls("vx",extra)}}catch(e){}
-if(atLogin)login()})();
-</script></body></html>
+if(atLogin){window.fbUser?enter():login()}})();
+</script><script type="module">
+const cfg={apiKey:"AIzaSyDjfwyC4gw0WIX6gBbpXApzQ-tPdVaaoFU",authDomain:"wordquest-wordi.firebaseapp.com",projectId:"wordquest-wordi",storageBucket:"wordquest-wordi.firebasestorage.app",messagingSenderId:"109775378869",appId:"1:109775378869:web:421f5acd586ceec082e1fc"};
+const V="https://www.gstatic.com/firebasejs/10.12.2/";
+try{
+const {initializeApp}=await import(V+"firebase-app.js"),A=await import(V+"firebase-auth.js"),S=await import(V+"firebase-firestore.js");
+const app=initializeApp(cfg),auth=A.getAuth(app),fs=S.getFirestore(app);
+window.fbUser=await new Promise(r=>A.onAuthStateChanged(auth,u=>r(u)));window.fbEmail=window.fbUser&&window.fbUser.email;window.fbOK=true;
+const signin=async()=>{if(!auth.currentUser)await A.signInWithPopup(auth,new A.GoogleAuthProvider());window.fbEmail=auth.currentUser.email;return auth.currentUser};
+const user={id:async()=>(await signin()).uid,canEdit:async()=>{const u=auth.currentUser;if(!u||!u.email)return false;try{return (await S.getDoc(S.doc(fs,"teachers",u.email))).exists()}catch(e){console.error("teacher check",e);return false}}};
+const db={doc:p=>{const r=S.doc(fs,...p.split("/"));return{get:async()=>{const x=await S.getDoc(r);return{exists:x.exists(),data:()=>x.data()}},set:d=>S.setDoc(r,d),update:d=>S.updateDoc(r,d)}},collection:c=>({get:async()=>({docs:(await S.getDocs(S.collection(fs,c))).docs.map(d=>({id:d.id,data:()=>d.data()}))})})};
+window.fbSignOut=()=>A.signOut(auth);window.fbToken=async()=>auth.currentUser?auth.currentUser.getIdToken():null;
+const call=async(prompt,json)=>{const t=await window.fbToken();const r=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+t},body:JSON.stringify({prompt,json})});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||("AI 호출 실패 "+r.status));return d};
+const sample=Object.assign(async p=>({text:(await call(p,false)).text}),{json:async p=>(await call(p,true)).data,limits:async()=>({})});
+window.claude={use:async n=>n=="user"?user:n=="db"?db:n=="sample"?sample:null};
+}catch(e){console.error(e)}
+window.fbReady=true;dispatchEvent(new Event("fbready"));
+</script>
+</body></html>
