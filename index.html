@@ -105,7 +105,7 @@ const use=n=>window.claude?window.claude.use(n).catch(()=>null):Promise.resolve(
 const shuffle=a=>[...a].sort(()=>Math.random()-.5);
 const ymd=(o=0)=>new Date(Date.now()+324e5-o*864e5).toISOString().slice(0,10);
 function toast(m){const e=document.createElement("div");e.className="tt";e.textContent=m;document.body.append(e);setTimeout(()=>e.remove(),1800)}
-let F=ls("vf")||{g:0,y:0},extra=ls("vx")||[],sample=null,db=null,user=null,uid=null,canEd=false,ME=null,admin=0,prev=0,playing=0,Q=[],qi=0,ok=0,tot=0,gain=0,full=0,set=[],PT="",t0=0,SI=-1,H=[],hi=-1,stage="q",bd=0,atLogin=1;
+let F=ls("vf")||{g:0,y:0},extra=ls("vx")||[],imp=ls("vi")||[],pendKey="",sample=null,db=null,user=null,uid=null,canEd=false,ME=null,admin=0,prev=0,playing=0,Q=[],qi=0,ok=0,tot=0,gain=0,full=0,set=[],PT="",t0=0,SI=-1,H=[],hi=-1,stage="q",bd=0,atLogin=1;
 const pool=()=>W.concat(extra),fpool=()=>pool().filter(x=>(!F.g||(x.g||1)==F.g)&&(!F.y||(x.y||2026)==F.y)&&(!F.m||(x.mo||0)==F.m)),sig=()=>set.map(x=>x.w).join("|");
 const cnt=()=>Math.min(60,Math.max(5,Math.round(+(ME&&ME.n))||20)),PK=[...PS.join("").matchAll(/\[\[(.+?)\]\]/g)].map(m=>m[1]);
 function today(){const N=cnt(),p=fpool();if(p.length<=N)return p;const key=F.g+"-"+F.y+"-"+F.m+"-"+N,dd=ME&&ME.day;
@@ -205,23 +205,30 @@ if(t.replace(/\s/g,"").length<80){for(let i=1;i<=Math.min(pdf.numPages,6);i++){c
 if(/\.(xlsx|xlsm|xls|ods)$/i.test(n)){if(!window.XLSX)throw Error("엑셀 읽기 도구를 불러오지 못했어요.");const wb=XLSX.read(await f.arrayBuffer());U.texts.push(wb.SheetNames.map(k=>XLSX.utils.sheet_to_csv(wb.Sheets[k])).join("\n"));return}
 if(/\.docx$/i.test(n)){if(!window.mammoth)throw Error("워드 읽기 도구를 불러오지 못했어요.");U.texts.push((await mammoth.extractRawText({arrayBuffer:await f.arrayBuffer()})).value);return}
 const t=await dec(f);if((t.match(/[\u0000-\u0008\ufffd]/g)||[]).length>t.length*.02)throw Error(n+": 읽을 수 없는 형식이에요. PDF·엑셀·워드·이미지·텍스트로 저장해서 올려 주세요.");U.texts.push(t)}
-async function saveExtra(){ls("vx",extra);try{if(db)await db.doc("vocab/extra").set({list:extra})}catch(e){}}
+async function hashBuf(b){return [...new Uint8Array(await crypto.subtle.digest("SHA-256",b))].map(x=>x.toString(16).padStart(2,"0")).join("")}
+const normW=v=>String(v).replace(/\s+/g,"");
+async function saveExtra(){ls("vx",extra);ls("vi",imp);try{if(db)await db.doc("vocab/extra").set({list:extra,imp:imp})}catch(e){}}
 $("#an").onclick=async()=>{if(!sample)return st("이 환경에서는 분석 기능을 쓸 수 없어요.");const bt=$("#an");bt.disabled=1;
-try{st("자료를 읽는 중…");const U={texts:[],imgs:[]};for(const f of $("#f").files){try{await readFile(f,U)}catch(e){st(e.message);bt.disabled=0;return}}
+try{st("자료를 읽는 중…");const keys=[],pk=pendKey;pendKey="";
+for(const f of $("#f").files){const k="f:"+await hashBuf(await f.arrayBuffer());if(imp.includes(k)){bt.disabled=0;return st("이미 가져오기 한 파일이에요: "+f.name+" (같은 파일은 다시 가져올 수 없어요)")}if(!keys.includes(k))keys.push(k)}
+const pt0=$("#tx").value.trim();if(pt0){const k="t:"+await hashBuf(new TextEncoder().encode(pt0));if(imp.includes(k)){bt.disabled=0;return st("이미 가져오기 한 텍스트예요.")}keys.push(k)}
+if(pk)keys.push(pk);
+const U={texts:[],imgs:[]};for(const f of $("#f").files){try{await readFile(f,U)}catch(e){st(e.message);bt.disabled=0;return}}
 const pt=$("#tx").value.trim();if(pt)U.texts.push(pt);if(!U.texts.length&&!U.imgs.length){bt.disabled=0;return st("파일이나 텍스트를 넣어 주세요.")}
 let mx=6;if(U.imgs.length){const lim=await (sample.limits?sample.limits():Promise.resolve({})).catch(()=>({}));if(!lim.images){bt.disabled=0;return st("이 환경에서는 이미지·스캔 파일을 분석할 수 없어요. 글자가 들어 있는 파일을 올려 주세요.")}mx=lim.images.maxCount||6}
 const jobs=U.texts.map(t=>({t:t.slice(0,15000)}));for(let i=0;i<U.imgs.length;i+=mx)jobs.push({t:"",im:U.imgs.slice(i,i+mx)});
-let tot=0;for(let i=0;i<jobs.length;i++){st(`AI가 어휘를 분석하는 중… (${i+1}/${jobs.length})`);const j=jobs[i];
+let tot=0,dup=0;for(let i=0;i<jobs.length;i++){st(`AI가 어휘를 분석하는 중… (${i+1}/${jobs.length})`);const j=jobs[i];
 const r=await sample.json(`수능 국어 독해에 도움이 되는 어휘를 아래 자료에서 최대 20개 뽑아라. ${j.im?"첨부한 이미지 속 글자를 읽어서 그 내용을 자료로 삼아라. ":""}JSON 배열만 출력: [{"s":0,"w":"단어의 어간 또는 명사 부분","t":"하다 같은 어미 또는 빈 문자열","m":"뜻(25자 이내)","e":"자료에 나온 문장으로 w가 그대로 들어 있는 것"}]. s는 0문학,1비문학,2화작,3문법,4기타. 이미 있는 단어는 제외: ${pool().map(x=>x.w).join(",")}\n자료:\n${j.t}`,j.im?{images:j.im}:undefined);
-const add=(Array.isArray(r)?r:[]).filter(x=>x&&x.w&&x.m&&x.e&&String(x.e).includes(x.w)&&x.s>=0&&x.s<5&&!pool().some(p=>p.w===x.w)).map(x=>({s:x.s|0,w:String(x.w),t:String(x.t||""),m:String(x.m),e:String(x.e),g:+$("#gs").value,y:+$("#ys").value||2026,mo:+$("#ms").value}));extra=extra.concat(add);tot+=add.length}
-await saveExtra();st(`${tot}개 단어를 추가했어요. 오늘의 학습 단어에 자동으로 반영됩니다.`);bt.disabled=0;if(!playing)adm()}catch(e){bt.disabled=0;st("분석 실패: "+(e.message||e.code||e))}};
-$("#au").onclick=async()=>{const g=$("#gs").value,y=$("#ys").value,m=$("#ms").value,u=$("#au2").value.trim();st("호랭이닷컴에서 자료를 가져오는 중…");
+const seen=new Set(pool().map(p=>normW(p.w)));const add=(Array.isArray(r)?r:[]).filter(x=>{if(!(x&&x.w&&x.m&&x.e&&String(x.e).includes(x.w)&&x.s>=0&&x.s<5))return false;const k=normW(x.w);if(seen.has(k)){dup++;return false}seen.add(k);return true}).map(x=>({s:x.s|0,w:String(x.w),t:String(x.t||""),m:String(x.m),e:String(x.e),g:+$("#gs").value,y:+$("#ys").value||2026,mo:+$("#ms").value}));extra=extra.concat(add);tot+=add.length}
+for(const k of keys)if(!imp.includes(k))imp.push(k);await saveExtra();st(`${tot}개 단어를 추가했어요.${dup?` (이미 있는 단어 ${dup}개는 제외)`:""} 오늘의 학습 단어에 자동으로 반영됩니다.`);bt.disabled=0;if(!playing)adm()}catch(e){bt.disabled=0;st("분석 실패: "+(e.message||e.code||e))}};
+$("#au").onclick=async()=>{const g=$("#gs").value,y=$("#ys").value,m=$("#ms").value,u=$("#au2").value.trim();const ak="a:"+(u||`${g}-${y}-${m}`);if(imp.includes(ak))return st("이미 가져오기 했어요: "+(u||`${y}년 ${m}월 고${g}`)+" (같은 자료는 다시 가져올 수 없어요)");
+st("호랭이닷컴에서 자료를 가져오는 중…");
 try{const t=await window.fbToken();const r=await fetch("/api/pdf?"+(u?"url="+encodeURIComponent(u):`g=${g}&y=${y}&m=${m}`),{headers:{Authorization:"Bearer "+t}});if(!r.ok)throw Error((await r.json().catch(()=>({}))).error||("가져오기 실패 "+r.status));
-const dt=new DataTransfer();dt.items.add(new File([await r.blob()],`${y}-${m}-고${g}.pdf`,{type:"application/pdf"}));$("#f").files=dt.files;$("#an").click()}catch(e){st("자동 가져오기 실패: "+(e.message||e))}};
-$("#rs").onclick=async()=>{extra=[];await saveExtra();st("추가한 단어를 지웠어요.");if(!playing)adm()};}
+const dt=new DataTransfer();dt.items.add(new File([await r.blob()],`${y}-${m}-고${g}.pdf`,{type:"application/pdf"}));$("#f").files=dt.files;pendKey=ak;$("#an").click()}catch(e){st("자동 가져오기 실패: "+(e.message||e))}};
+$("#rs").onclick=async()=>{extra=[];imp=[];await saveExtra();st("추가한 단어를 지웠어요.");if(!playing)adm()};}
 login();
 (async()=>{await new Promise(r=>window.fbReady?r():addEventListener("fbready",r,{once:true}));sample=await use("sample");user=await use("user");db=await use("db");try{canEd=!!(user&&await user.canEdit())}catch(e){}
-if(db)try{const s=await db.doc("vocab/extra").get();if(s.exists&&Array.isArray(s.data().list)){extra=s.data().list;ls("vx",extra)}}catch(e){}
+if(db)try{const s=await db.doc("vocab/extra").get();if(s.exists&&Array.isArray(s.data().list)){extra=s.data().list;ls("vx",extra);imp=Array.isArray(s.data().imp)?s.data().imp:[];ls("vi",imp)}}catch(e){}
 if(atLogin){window.fbUser?enter():login()}})();
 </script><script type="module">
 const cfg={apiKey:"AIzaSyDjfwyC4gw0WIX6gBbpXApzQ-tPdVaaoFU",authDomain:"wordquest-wordi.firebaseapp.com",projectId:"wordquest-wordi",storageBucket:"wordquest-wordi.firebasestorage.app",messagingSenderId:"109775378869",appId:"1:109775378869:web:421f5acd586ceec082e1fc"};
