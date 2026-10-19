@@ -1,14 +1,21 @@
 const { verify } = require("./_auth");
 
-const getKey = () => (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+// 이름이 GEMINI_API_KEY / GOOGLE_API_KEY 와 비슷하면(대소문자 무시) 찾아서 씁니다.
+const getKey = () => { const k = Object.keys(process.env).find(n => /^(GEM\w*|GOOGLE)_API_KEY$/i.test(n)); return k ? (process.env[k] || "").trim() : ""; };
 
-// 제미나이(구글 AI 스튜디오)만 사용합니다. 필요한 환경변수: GEMINI_API_KEY
-// (선택) GEMINI_MODEL - 기본값 gemini-2.5-flash
-async function ask(prompt, json) {
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-  const generationConfig = { maxOutputTokens: json ? 8192 : 2048 };
-  // 2.5 계열은 '생각'에 출력 토큰을 쓰다가 답이 중간에 잘릴 수 있어서 생각을 끕니다.
-  if (/2\.5/.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+// 위에서부터 차례로 시도하고, 실패하면 다음 모델로 넘어갑니다.
+// 환경변수 GEMINI_MODELS(쉼표로 구분)를 넣으면 그 모델을 맨 앞에 먼저 시도해요.
+const DEFAULTS = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
+const MODELS = [...new Set(((process.env.GEMINI_MODELS || process.env.GEMINI_MODEL || "").split(",").map(s => s.trim()).filter(Boolean)).concat(DEFAULTS))];
+
+async function ask(model, prompt, json, noThink) {
+  const generationConfig = { maxOutputTokens: json ? 16384 : 2048 };
+  let think = null;
+  if (!noThink) {
+    if (/gemini-2\.5/.test(model)) think = { thinkingBudget: 0 };      // 2.5 계열: 생각 끄기
+    else if (/gemini-3/.test(model)) think = { thinkingLevel: "low" };   // 3.x 계열: 생각 최소화
+  }
+  if (think) generationConfig.thinkingConfig = think;
   if (json) generationConfig.responseMimeType = "application/json";
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
@@ -16,11 +23,15 @@ async function ask(prompt, json) {
     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig })
   });
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error((d.error && d.error.message) || "Gemini 호출에 실패했어요 (" + r.status + ")");
+  if (!r.ok) {
+    const msg = (d.error && d.error.message) || ("호출 실패 " + r.status);
+    if (think && r.status === 400 && /think/i.test(msg)) return ask(model, prompt, json, true); // thinking 설정이 안 맞으면 빼고 다시
+    throw new Error(msg);
+  }
   const c = d.candidates && d.candidates[0];
-  if (!c) throw new Error("Gemini가 답을 주지 않았어요" + (d.promptFeedback && d.promptFeedback.blockReason ? " (" + d.promptFeedback.blockReason + ")" : ""));
+  if (!c) throw new Error("답 없음" + (d.promptFeedback && d.promptFeedback.blockReason ? " (" + d.promptFeedback.blockReason + ")" : ""));
   const text = ((c.content && c.content.parts) || []).map(p => p.text || "").join("");
-  if (!text) throw new Error("Gemini 답이 비어 있어요 (" + (c.finishReason || "알 수 없음") + ")");
+  if (!text) throw new Error("빈 답 (" + (c.finishReason || "알 수 없음") + ")");
   return text;
 }
 
@@ -34,11 +45,20 @@ module.exports = async (req, res) => {
   if (prompt.length > (json ? 20000 : 2000)) return res.status(413).json({ error: "내용이 너무 길어요" });
   if (!getKey()) {
     const names = Object.keys(process.env).filter(k => /GEM|GOOG|API|KEY/i.test(k) && !/^(AWS|VERCEL_)/.test(k)).join(", ") || "없음";
-    return res.status(500).json({ error: "서버에 GEMINI_API_KEY가 설정되지 않았어요 [진단: 환경=" + (process.env.VERCEL_ENV || "?") + ", 프로젝트=" + (process.env.VERCEL_URL || "?") + ", 비슷한 이름=" + names + "]" });
+    return res.status(500).json({ error: "서버에 GEMINI_API_KEY가 설정되지 않았어요 [진단: 환경=" + (process.env.VERCEL_ENV || "?") + ", 비슷한 이름=" + names + "]" });
   }
-  let text;
-  try { text = await ask(prompt, json); } catch (e) { return res.status(502).json({ error: e.message }); }
-  if (!json) return res.json({ text });
-  const m = text.replace(/```json|```/g, "").match(/\[[\s\S]*\]/);
-  try { return res.json({ data: JSON.parse(m[0]) }); } catch (e) { return res.status(502).json({ error: "결과를 해석하지 못했어요 (답이 중간에 끊겼을 수 있어요)" }); }
+  const errs = [];
+  for (const model of MODELS) {
+    try {
+      const text = await ask(model, prompt, json);
+      if (!json) return res.json({ text });
+      const m = text.replace(/```json|```/g, "").match(/\[[\s\S]*\]/);
+      if (!m) throw new Error("JSON 배열을 찾지 못함");
+      return res.json({ data: JSON.parse(m[0]), model });
+    } catch (e) {
+      errs.push(model + ": " + e.message);
+      if (/API key not valid|API_KEY_INVALID|UNAUTHENTICATED/i.test(e.message)) break; // 키 자체가 틀리면 다른 모델도 소용없음
+    }
+  }
+  return res.status(502).json({ error: "제미나이 모델을 모두 시도했지만 실패했어요 → " + errs.join(" | ") });
 };
