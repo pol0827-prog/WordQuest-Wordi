@@ -8,24 +8,32 @@ const getKey = () => { const k = Object.keys(process.env).find(n => /^(GEM\w*|GO
 const DEFAULTS = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
 const MODELS = [...new Set(((process.env.GEMINI_MODELS || process.env.GEMINI_MODEL || "").split(",").map(s => s.trim()).filter(Boolean)).concat(DEFAULTS))];
 
-async function ask(model, prompt, json, noThink) {
+async function ask(model, prompt, json, noThink, ms) {
   const generationConfig = { maxOutputTokens: json ? 16384 : 2048 };
   let think = null;
   if (!noThink) {
     if (/gemini-2\.5/.test(model)) think = { thinkingBudget: 0 };      // 2.5 계열: 생각 끄기
-    else if (/gemini-3/.test(model)) think = { thinkingLevel: "low" };   // 3.x 계열: 생각 최소화
+    else if (/gemini-3/.test(model)) think = { thinkingLevel: "minimal" }; // 3.x 계열: 생각 최소화(빠르게)
   }
   if (think) generationConfig.thinkingConfig = think;
   if (json) generationConfig.responseMimeType = "application/json";
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms || 20000);
+  let r, d;
+  try {
+  r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
+    signal: ctl.signal,
     headers: { "content-type": "application/json", "x-goog-api-key": getKey() },
     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig })
   });
-  const d = await r.json().catch(() => ({}));
+  d = await r.json().catch(() => ({}));
+  } catch (e) {
+    throw new Error(e.name === "AbortError" ? "시간 초과" : e.message);
+  } finally { clearTimeout(timer); }
   if (!r.ok) {
     const msg = (d.error && d.error.message) || ("호출 실패 " + r.status);
-    if (think && r.status === 400 && /think/i.test(msg)) return ask(model, prompt, json, true); // thinking 설정이 안 맞으면 빼고 다시
+    if (think && r.status === 400 && /think/i.test(msg)) return ask(model, prompt, json, true, ms); // thinking 설정이 안 맞으면 빼고 다시
     throw new Error(msg);
   }
   const c = d.candidates && d.candidates[0];
@@ -47,10 +55,12 @@ module.exports = async (req, res) => {
     const names = Object.keys(process.env).filter(k => /GEM|GOOG|API|KEY/i.test(k) && !/^(AWS|VERCEL_)/.test(k)).join(", ") || "없음";
     return res.status(500).json({ error: "서버에 GEMINI_API_KEY가 설정되지 않았어요 [진단: 환경=" + (process.env.VERCEL_ENV || "?") + ", 비슷한 이름=" + names + "]" });
   }
-  const errs = [];
+  const errs = [], T0 = Date.now();
   for (const model of MODELS) {
+    const left = 54000 - (Date.now() - T0); // 서버 제한(60초) 안에서 끝내기
+    if (left < 6000) { errs.push("남은 시간 부족으로 중단"); break; }
     try {
-      const text = await ask(model, prompt, json);
+      const text = await ask(model, prompt, json, false, Math.min(20000, left - 2000));
       if (!json) return res.json({ text });
       const m = text.replace(/```json|```/g, "").match(/\[[\s\S]*\]/);
       if (!m) throw new Error("JSON 배열을 찾지 못함");
