@@ -1,5 +1,7 @@
 const { verify } = require("./_auth");
 
+const getKey = () => (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+
 // 제미나이(구글 AI 스튜디오)만 사용합니다. 필요한 환경변수: GEMINI_API_KEY
 // (선택) GEMINI_MODEL - 기본값 gemini-2.5-flash
 async function ask(prompt, json) {
@@ -10,7 +12,7 @@ async function ask(prompt, json) {
   if (json) generationConfig.responseMimeType = "application/json";
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+    headers: { "content-type": "application/json", "x-goog-api-key": getKey() },
     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig })
   });
   const d = await r.json().catch(() => ({}));
@@ -30,7 +32,10 @@ module.exports = async (req, res) => {
   if (typeof prompt !== "string" || !prompt.trim()) return res.status(400).json({ error: "내용이 없어요" });
   if (json && !u.teacher) return res.status(403).json({ error: "교사 계정만 쓸 수 있어요" });
   if (prompt.length > (json ? 20000 : 2000)) return res.status(413).json({ error: "내용이 너무 길어요" });
-  if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: "서버에 GEMINI_API_KEY가 설정되지 않았어요" });
+  if (!getKey()) {
+    const names = Object.keys(process.env).filter(k => /GEM|GOOG|API|KEY/i.test(k) && !/^(AWS|VERCEL_)/.test(k)).join(", ") || "없음";
+    return res.status(500).json({ error: "서버에 GEMINI_API_KEY가 설정되지 않았어요 [진단: 환경=" + (process.env.VERCEL_ENV || "?") + ", 프로젝트=" + (process.env.VERCEL_URL || "?") + ", 비슷한 이름=" + names + "]" });
+  }
   let text;
   try { text = await ask(prompt, json); } catch (e) { return res.status(502).json({ error: e.message }); }
   if (!json) return res.json({ text });
